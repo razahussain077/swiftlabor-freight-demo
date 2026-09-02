@@ -94,8 +94,18 @@ function normalizeRecord(result: unknown) {
   return record;
 }
 
+function getGrokApiKey() {
+  // SCOUT is the environment variable configured by the user for Grok.
+  // Keep the documented aliases for backwards compatibility.
+  return process.env.SCOUT || process.env.SCOUT_GROK_KEY || process.env.XAI_API_KEY;
+}
+
+function getGeminiApiKey() {
+  return process.env.GEMINI_API_KEY || process.env.SCOUT_GEMINI_KEY || process.env.GOOGLE_API_KEY;
+}
+
 async function runGrok(company: string, icp: string) {
-  const apiKey = process.env.SCOUT || process.env.XAI_API_KEY;
+  const apiKey = getGrokApiKey();
   if (!apiKey) throw new Error("SCOUT_GROK_KEY_MISSING");
 
   const client = new OpenAI({ apiKey, baseURL: "https://api.x.ai/v1" });
@@ -119,7 +129,7 @@ async function runGrok(company: string, icp: string) {
 }
 
 async function runGemini(company: string, icp: string) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   if (!apiKey) throw new Error("SCOUT_GEMINI_KEY_MISSING");
 
   const ai = new GoogleGenAI({ apiKey });
@@ -160,8 +170,6 @@ export async function POST(request: Request) {
     } catch (grokError) {
       console.error("scout-grok-failed", grokError);
 
-      // Gemini remains a resilience fallback. If its quota is exhausted too,
-      // surface a useful rate-limit response instead of a misleading generic 500.
       try {
         record = await runGemini(company, icp);
         provider = "gemini";
@@ -184,7 +192,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ...record, agent: "Scout", provider });
   } catch (error) {
     console.error("lead-research-agent", error);
-    const message = String((error as Error)?.message || "");
     const isJsonError = error instanceof SyntaxError;
     return NextResponse.json(
       { error: isJsonError ? "Scout returned an invalid research record. Please try again." : "Scout could not complete the research. Please try again." },
