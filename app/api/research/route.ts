@@ -95,9 +95,9 @@ function normalizeRecord(result: unknown) {
 }
 
 function getGrokApiKey() {
-  // SCOUT is the environment variable configured by the user for Grok.
-  // Keep the documented aliases for backwards compatibility.
-  return process.env.SCOUT || process.env.SCOUT_GROK_KEY || process.env.XAI_API_KEY;
+  // The Vercel environment variable is intentionally lowercase: scout.
+  // Keep documented aliases for backwards compatibility.
+  return process.env.scout || process.env.SCOUT_GROK_KEY || process.env.XAI_API_KEY;
 }
 
 function getGeminiApiKey() {
