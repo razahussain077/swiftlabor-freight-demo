@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -58,12 +58,26 @@ function isAllowedUrl(value: string) {
   }
 }
 
+function extractGroundingSources(response: any) {
+  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks;
+  if (!Array.isArray(chunks)) return [];
+
+  return chunks
+    .map((chunk: any) => chunk?.web)
+    .filter((web: any) => web?.uri && isAllowedUrl(String(web.uri)))
+    .map((web: any) => ({
+      title: cleanText(web.title || "Web source", 180),
+      url: String(web.uri),
+      type: "web",
+    }));
+}
+
 export async function POST(request: Request) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Scout is not configured yet. Add the OpenAI API key in Vercel, then redeploy." },
+        { error: "Scout is not configured yet. Add GEMINI_API_KEY in Vercel, then redeploy." },
         { status: 503 },
       );
     }
@@ -78,32 +92,50 @@ export async function POST(request: Request) {
     if (!company) return NextResponse.json({ error: "Company or domain is required." }, { status: 400 });
     if (company.length < 2) return NextResponse.json({ error: "Enter a valid company name or domain." }, { status: 400 });
 
-    const client = new OpenAI({ apiKey, timeout: 60_000, maxRetries: 1 });
-    const response = await client.responses.create({
-      model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
-      tools: [{ type: "web_search" }],
-      instructions:
-        "You are Scout, SwiftLabor's Lead Intelligence Agent. Research B2B prospects for a professional sales team. Use web search before factual claims. Prefer first-party company sources, official filings, company newsroom/careers pages, and reputable professional sources. Never invent people, buying signals, URLs, job titles, company size, or evidence. Every signal must have a concrete evidence trail. Distinguish observed evidence from inference. Score ICP fit and buying intent independently. A high ICP fit does not imply buying intent. A buying signal should be recent or clearly ongoing when possible. Identify a decision maker only when the person, title, and relevance can be verified from public evidence; otherwise return empty strings. Return only source URLs you actually observed during research; never manufacture a URL. Keep the final record concise and useful for outbound sales.",
-      input: `Research this prospect deeply.\n\nCompany/domain: ${company}\nICP criteria: ${icp || "US B2B companies with an active sales motion and a credible need for AI-powered lead research, qualification, buying-signal detection, or sales workflow automation."}\n\nInvestigate company identity and business model, approximate size, sales motion, growth/hiring, operational complexity, technology or automation initiatives, recent announcements, and credible indicators of active buying need. Identify the strongest evidence-backed reason to contact this account and the most relevant executive/revenue leader when verifiable. Include the strongest public sources used. Return only the requested structured qualification record.`,
-      text: { format: { type: "json_schema", name: "lead_qualification", strict: true, schema } },
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
+      contents: `You are Scout, SwiftLabor's Lead Intelligence Agent. Research B2B prospects for a professional sales team.
+
+Use Google Search to verify factual claims. Prefer first-party company sources, official filings, company newsroom/careers pages, and reputable professional sources. Never invent people, buying signals, URLs, job titles, company size, or evidence. Every signal must have a concrete evidence trail. Distinguish observed evidence from inference. Score ICP fit and buying intent independently. A high ICP fit does not imply buying intent. A buying signal should be recent or clearly ongoing when possible. Identify a decision maker only when the person, title, and relevance can be verified from public evidence; otherwise return empty strings.
+
+Company/domain: ${company}
+ICP criteria: ${icp || "US B2B companies with an active sales motion and a credible need for AI-powered lead research, qualification, buying-signal detection, or sales workflow automation."}
+
+Investigate company identity and business model, approximate size, sales motion, growth/hiring, operational complexity, technology or automation initiatives, recent announcements, and credible indicators of active buying need. Identify the strongest evidence-backed reason to contact this account and the most relevant executive/revenue leader when verifiable.
+
+Return ONLY valid JSON matching this exact schema. Do not wrap it in markdown fences:
+${JSON.stringify(schema)}`,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: schema,
+        temperature: 0.2,
+      },
     });
 
     let result: unknown;
     try {
-      result = JSON.parse(response.output_text);
+      result = JSON.parse(response.text || "");
     } catch {
-      console.error("lead-research-agent-invalid-output", response.output_text.slice(0, 1000));
+      console.error("lead-research-agent-invalid-output", (response.text || "").slice(0, 1000));
       return NextResponse.json({ error: "Scout returned an invalid research record. Please try again." }, { status: 502 });
     }
 
     const record = result as Record<string, any>;
-    record.sources = Array.isArray(record.sources)
+    const groundedSources = extractGroundingSources(response);
+    const modelSources = Array.isArray(record.sources)
       ? record.sources.filter((source: any) => source && isAllowedUrl(String(source.url ?? ""))).slice(0, 8)
       : [];
+    const sources = [...modelSources, ...groundedSources].filter(
+      (source, index, all) => all.findIndex((item) => item.url === source.url) === index,
+    ).slice(0, 8);
+
+    record.sources = sources;
     record.signals = Array.isArray(record.signals) ? record.signals.slice(0, 8) : [];
     record.risks = Array.isArray(record.risks) ? record.risks.slice(0, 6) : [];
 
-    return NextResponse.json({ ...record, agent: "Scout" });
+    return NextResponse.json({ ...record, agent: "Scout", provider: "gemini" });
   } catch (error) {
     console.error("lead-research-agent", error);
     return NextResponse.json({ error: "Scout could not complete the research. Please try again." }, { status: 500 });
