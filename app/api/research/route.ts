@@ -94,7 +94,9 @@ export async function POST(request: Request) {
 
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
+      // Gemini 2.5 Flash-Lite has been retired for new users. Gemini 3.5 Flash-Lite
+      // is the current low-latency model and supports Google Search grounding.
+      model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
       contents: `You are Scout, SwiftLabor's Lead Intelligence Agent. Research B2B prospects for a professional sales team.
 
 Use Google Search to verify factual claims. Prefer first-party company sources, official filings, company newsroom/careers pages, and reputable professional sources. Never invent people, buying signals, URLs, job titles, company size, or evidence. Every signal must have a concrete evidence trail. Distinguish observed evidence from inference. Score ICP fit and buying intent independently. A high ICP fit does not imply buying intent. A buying signal should be recent or clearly ongoing when possible. Identify a decision maker only when the person, title, and relevance can be verified from public evidence; otherwise return empty strings.
