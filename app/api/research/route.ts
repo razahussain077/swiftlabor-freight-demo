@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -62,14 +61,14 @@ function isAllowedUrl(value: string) {
 function buildPrompt(company: string, icp: string) {
   return `You are Scout, SwiftLabor's Lead Intelligence Agent. Research B2B prospects for a professional sales team.
 
-Use web search to verify factual claims. Prefer first-party company sources, official filings, company newsroom/careers pages, and reputable professional sources. Never invent people, buying signals, URLs, job titles, company size, or evidence. Every signal must have a concrete evidence trail. Distinguish observed evidence from inference. Score ICP fit and buying intent independently. A high ICP fit does not imply buying intent. A buying signal should be recent or clearly ongoing when possible. Identify a decision maker only when the person, title, and relevance can be verified from public evidence; otherwise return empty strings.
+You must be evidence-led. Do not invent people, buying signals, URLs, job titles, company size, or evidence. Because this model endpoint does not have a live browser/search tool attached, never claim that you searched the web or verified a fact that is not present in the supplied input. If a fact cannot be established from your available knowledge, leave the relevant field empty or state that it could not be verified. Distinguish observed information from inference. Score ICP fit and buying intent independently. A high ICP fit does not imply buying intent.
 
 Company/domain: ${company}
 ICP criteria: ${icp || "US B2B companies with an active sales motion and a credible need for AI-powered lead research, qualification, buying-signal detection, or sales workflow automation."}
 
-Investigate company identity and business model, approximate size, sales motion, growth/hiring, operational complexity, technology or automation initiatives, recent announcements, and credible indicators of active buying need. Identify the strongest evidence-backed reason to contact this account and the most relevant executive/revenue leader when verifiable.
+Analyze the company identity and business model, likely sales motion, operational complexity, technology/automation needs, and the strongest plausible reason to contact this account. Identify a decision maker only when you can provide a reliable public URL from your available knowledge; otherwise return empty strings. Do not fabricate sources.
 
-Return ONLY valid JSON matching this exact schema. Do not wrap it in markdown fences:
+Return ONLY valid JSON matching this schema. Do not wrap it in markdown fences:
 ${JSON.stringify(schema)}`;
 }
 
@@ -94,59 +93,46 @@ function normalizeRecord(result: unknown) {
   return record;
 }
 
-function getGrokApiKey() {
-  // The Vercel environment variable is intentionally lowercase: scout.
-  // Keep documented aliases for backwards compatibility.
-  return process.env.scout || process.env.SCOUT_GROK_KEY || process.env.XAI_API_KEY;
+function getOpenRouterApiKey() {
+  // Support both the conventional production variable and the lowercase name
+  // in case the key was already added that way in Vercel.
+  return process.env.OPENROUTER_API_KEY || process.env.openrouter;
 }
 
-function getGeminiApiKey() {
-  return process.env.GEMINI_API_KEY || process.env.SCOUT_GEMINI_KEY || process.env.GOOGLE_API_KEY;
-}
+async function runOpenRouter(company: string, icp: string) {
+  const apiKey = getOpenRouterApiKey();
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY_MISSING");
 
-async function runGrok(company: string, icp: string) {
-  const apiKey = getGrokApiKey();
-  if (!apiKey) throw new Error("SCOUT_GROK_KEY_MISSING");
+  const client = new OpenAI({
+    apiKey,
+    baseURL: "https://openrouter.ai/api/v1",
+    defaultHeaders: {
+      "HTTP-Referer": "https://swiftlabor.ai",
+      "X-Title": "SwiftLabor Scout",
+    },
+  });
 
-  const client = new OpenAI({ apiKey, baseURL: "https://api.x.ai/v1" });
-  const response = await client.responses.create({
-    model: process.env.SCOUT_MODEL || "grok-4.6",
-    input: buildPrompt(company, icp),
-    tools: [{ type: "web_search" }],
-    text: {
-      format: {
-        type: "json_schema",
-        name: "scout_lead_research",
-        schema,
-        strict: true,
+  const response = await client.chat.completions.create({
+    model: process.env.OPENROUTER_MODEL || "google/gemma-4-31b-it:free",
+    messages: [
+      {
+        role: "system",
+        content: "You are a precise B2B lead intelligence analyst. Follow the user's schema exactly and never fabricate evidence.",
       },
-    },
+      { role: "user", content: buildPrompt(company, icp) },
+    ],
+    temperature: 0.2,
+    response_format: { type: "json_object" },
   });
 
-  const text = response.output_text || "";
-  if (!text) throw new Error("SCOUT_GROK_EMPTY_OUTPUT");
-  return normalizeRecord(JSON.parse(text));
-}
+  const text = response.choices?.[0]?.message?.content || "";
+  if (!text) throw new Error("SCOUT_OPENROUTER_EMPTY_OUTPUT");
 
-async function runGemini(company: string, icp: string) {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) throw new Error("SCOUT_GEMINI_KEY_MISSING");
-
-  const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
-    contents: buildPrompt(company, icp),
-    config: {
-      tools: [{ googleSearch: {} }],
-      responseMimeType: "application/json",
-      responseSchema: schema,
-      temperature: 0.2,
-    },
-  });
-
-  const text = response.text || "";
-  if (!text) throw new Error("SCOUT_GEMINI_EMPTY_OUTPUT");
-  return normalizeRecord(JSON.parse(text));
+  try {
+    return normalizeRecord(JSON.parse(text));
+  } catch {
+    throw new Error("SCOUT_OPENROUTER_INVALID_JSON");
+  }
 }
 
 export async function POST(request: Request) {
@@ -161,41 +147,22 @@ export async function POST(request: Request) {
     if (!company) return NextResponse.json({ error: "Company or domain is required." }, { status: 400 });
     if (company.length < 2) return NextResponse.json({ error: "Enter a valid company name or domain." }, { status: 400 });
 
-    let record: Record<string, any>;
-    let provider: "grok" | "gemini";
-
     try {
-      record = await runGrok(company, icp);
-      provider = "grok";
-    } catch (grokError) {
-      console.error("scout-grok-failed", grokError);
-
-      try {
-        record = await runGemini(company, icp);
-        provider = "gemini";
-      } catch (geminiError) {
-        console.error("scout-gemini-fallback-failed", geminiError);
-        const message = String((geminiError as Error)?.message || "");
-        const status = message.includes("429") || message.includes("RESOURCE_EXHAUSTED") ? 429 : 502;
-        return NextResponse.json(
-          {
-            error:
-              status === 429
-                ? "Scout's AI providers are currently rate-limited. Please try again shortly."
-                : "Scout could not complete the research. Please verify the provider configuration and try again.",
-          },
-          { status },
-        );
-      }
+      const record = await runOpenRouter(company, icp);
+      return NextResponse.json({ ...record, agent: "Scout", provider: "openrouter", model: process.env.OPENROUTER_MODEL || "google/gemma-4-31b-it:free" });
+    } catch (providerError) {
+      console.error("scout-openrouter-failed", providerError);
+      const message = String((providerError as Error)?.message || "");
+      const status = message.includes("429") || message.includes("rate") || message.includes("quota") ? 429 : 502;
+      const error = message === "OPENROUTER_API_KEY_MISSING"
+        ? "OPENROUTER_API_KEY is not configured."
+        : status === 429
+          ? "Scout is temporarily rate-limited. Please try again shortly."
+          : "Scout could not complete the research through OpenRouter. Please verify the OpenRouter API key and model configuration.";
+      return NextResponse.json({ error }, { status });
     }
-
-    return NextResponse.json({ ...record, agent: "Scout", provider });
   } catch (error) {
     console.error("lead-research-agent", error);
-    const isJsonError = error instanceof SyntaxError;
-    return NextResponse.json(
-      { error: isJsonError ? "Scout returned an invalid research record. Please try again." : "Scout could not complete the research. Please try again." },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Scout could not complete the research. Please try again." }, { status: 500 });
   }
 }
