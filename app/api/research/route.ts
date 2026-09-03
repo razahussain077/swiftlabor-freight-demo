@@ -61,7 +61,7 @@ function isAllowedUrl(value: string) {
 function buildPrompt(company: string, icp: string) {
   return `You are Scout, SwiftLabor's Lead Intelligence Agent. Research B2B prospects for a professional sales team.
 
-You must be evidence-led. Do not invent people, buying signals, URLs, job titles, company size, or evidence. This request uses Kimi's API without an external browser/search tool, so never claim that you searched the web or verified a fact that is not actually available to you. If a fact cannot be established, leave the relevant field empty or state that it could not be verified. Distinguish observed information from inference. Score ICP fit and buying intent independently. A high ICP fit does not imply buying intent.
+You must be evidence-led. Do not invent people, buying signals, URLs, job titles, company size, or evidence. This model is being accessed through OpenRouter and does not automatically have a live browser unless a web-search tool is explicitly enabled. Never claim that you searched the web or verified a fact that is not actually available to you. If a fact cannot be established, leave the relevant field empty or state that it could not be verified. Distinguish observed information from inference. Score ICP fit and buying intent independently. A high ICP fit does not imply buying intent.
 
 Company/domain: ${company}
 ICP criteria: ${icp || "US B2B companies with an active sales motion and a credible need for AI-powered lead research, qualification, buying-signal detection, or sales workflow automation."}
@@ -93,29 +93,48 @@ function normalizeRecord(result: unknown) {
   return record;
 }
 
-function getKimiApiKey() {
-  // Vercel environment variable names are case-sensitive. The user's existing
-  // key is named "swift", while the conventional Kimi names are also supported.
+function getOpenRouterApiKey() {
+  // Keep support for the user's existing Vercel variable name: "swift".
+  // OpenRouter's conventional name is OPENROUTER_API_KEY.
   return (
+    process.env.OPENROUTER_API_KEY ||
     process.env.swift ||
     process.env.SWIFT ||
-    process.env.KIMI_API_KEY ||
-    process.env.MOONSHOT_API_KEY
+    process.env.openrouter
   );
 }
 
-async function runKimi(company: string, icp: string) {
-  const apiKey = getKimiApiKey();
-  if (!apiKey) throw new Error("KIMI_API_KEY_MISSING");
+function getOpenRouterModel() {
+  // A configured OPENROUTER_MODEL always wins. The default is Kimi K2.6's
+  // free endpoint so the demo can run without accidentally spending credits.
+  return process.env.OPENROUTER_MODEL || "moonshotai/kimi-k2.6:free";
+}
 
+function getProviderError(providerError: unknown) {
+  const error = providerError as any;
+  const status = Number(error?.status ?? error?.code ?? 0);
+  const message = String(error?.error?.message ?? error?.message ?? "");
+  const raw = String(error?.error?.metadata?.raw ?? "");
+  return { status, message, raw };
+}
+
+async function runOpenRouter(company: string, icp: string) {
+  const apiKey = getOpenRouterApiKey();
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY_MISSING");
+
+  const model = getOpenRouterModel();
   const client = new OpenAI({
     apiKey,
-    baseURL: "https://api.moonshot.ai/v1",
+    baseURL: "https://openrouter.ai/api/v1",
     timeout: 90_000,
+    defaultHeaders: {
+      "HTTP-Referer": "https://swiftlabor.ai",
+      "X-Title": "SwiftLabor Scout",
+    },
   });
 
   const response = await client.chat.completions.create({
-    model: process.env.KIMI_MODEL || "kimi-k2.6",
+    model,
     messages: [
       {
         role: "system",
@@ -123,20 +142,19 @@ async function runKimi(company: string, icp: string) {
       },
       { role: "user", content: buildPrompt(company, icp) },
     ],
+    // Kimi K2.x endpoints can reject arbitrary temperature values, so let the
+    // selected provider/model control generation behavior.
     response_format: { type: "json_object" },
     max_completion_tokens: 8192,
-    extra_body: {
-      thinking: { type: "disabled" },
-    },
   });
 
   const text = response.choices?.[0]?.message?.content || "";
-  if (!text) throw new Error("SCOUT_KIMI_EMPTY_OUTPUT");
+  if (!text) throw new Error("SCOUT_OPENROUTER_EMPTY_OUTPUT");
 
   try {
     return normalizeRecord(JSON.parse(text));
   } catch {
-    throw new Error("SCOUT_KIMI_INVALID_JSON");
+    throw new Error("SCOUT_OPENROUTER_INVALID_JSON");
   }
 }
 
@@ -153,27 +171,38 @@ export async function POST(request: Request) {
     if (company.length < 2) return NextResponse.json({ error: "Enter a valid company name or domain." }, { status: 400 });
 
     try {
-      const record = await runKimi(company, icp);
+      const record = await runOpenRouter(company, icp);
       return NextResponse.json({
         ...record,
         agent: "Scout",
-        provider: "kimi",
-        model: process.env.KIMI_MODEL || "kimi-k2.6",
+        provider: "openrouter",
+        model: getOpenRouterModel(),
       });
     } catch (providerError) {
-      console.error("scout-kimi-failed", providerError);
-      const message = String((providerError as Error)?.message || "");
-      const status = message.includes("429") || message.includes("rate") || message.includes("quota") ? 429 : 502;
-      const error = message === "KIMI_API_KEY_MISSING"
-        ? "Kimi API key is not configured. Add the Vercel environment variable named swift (or KIMI_API_KEY) and redeploy."
-        : status === 429
-          ? "Scout is temporarily rate-limited by Kimi. Please try again shortly."
-          : message.includes("401") || message.includes("Unauthorized")
-            ? "Kimi rejected the API key. Check that the Vercel variable named swift contains the Kimi API key, then redeploy."
-            : message.includes("model_not_found") || message.includes("model")
-              ? "The configured Kimi model is unavailable. Check KIMI_MODEL or use kimi-k2.6."
-              : "Scout could not complete the research through Kimi. Check the Kimi API key and deployment logs.";
-      return NextResponse.json({ error }, { status });
+      const { status, message, raw } = getProviderError(providerError);
+      console.error("scout-openrouter-failed", {
+        status,
+        message,
+        raw,
+        model: getOpenRouterModel(),
+      });
+
+      const combined = `${message} ${raw}`.toLowerCase();
+      const isRateLimited = status === 429 || combined.includes("rate-limited") || combined.includes("rate limit") || combined.includes("quota");
+      const isUnauthorized = status === 401 || combined.includes("invalid api key") || combined.includes("unauthorized");
+      const isModelError = status === 404 || (combined.includes("model") && (combined.includes("not found") || combined.includes("unavailable")));
+
+      const error = message === "OPENROUTER_API_KEY_MISSING"
+        ? "OpenRouter API key is not configured. Add the Vercel environment variable named swift (or OPENROUTER_API_KEY) and redeploy."
+        : isUnauthorized
+          ? "OpenRouter rejected the API key. Check the Vercel variable named swift, then redeploy."
+          : isRateLimited
+            ? "This OpenRouter model/provider is temporarily rate-limited. Try again shortly or select another OpenRouter model."
+            : isModelError
+              ? `The OpenRouter model is unavailable: ${getOpenRouterModel()}. Set OPENROUTER_MODEL to an available model.`
+              : "Scout could not complete the research through OpenRouter. Check the OpenRouter model configuration and deployment logs.";
+
+      return NextResponse.json({ error }, { status: isRateLimited ? 429 : 502 });
     }
   } catch (error) {
     console.error("lead-research-agent", error);
