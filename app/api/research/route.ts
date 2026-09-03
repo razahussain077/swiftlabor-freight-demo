@@ -61,14 +61,14 @@ function isAllowedUrl(value: string) {
 function buildPrompt(company: string, icp: string) {
   return `You are Scout, SwiftLabor's Lead Intelligence Agent. Research B2B prospects for a professional sales team.
 
-You must be evidence-led. Do not invent people, buying signals, URLs, job titles, company size, or evidence. Because this model endpoint does not have a live browser/search tool attached, never claim that you searched the web or verified a fact that is not present in the supplied input. If a fact cannot be established from your available knowledge, leave the relevant field empty or state that it could not be verified. Distinguish observed information from inference. Score ICP fit and buying intent independently. A high ICP fit does not imply buying intent.
+You must be evidence-led. Do not invent people, buying signals, URLs, job titles, company size, or evidence. This request uses Kimi's API without an external browser/search tool, so never claim that you searched the web or verified a fact that is not actually available to you. If a fact cannot be established, leave the relevant field empty or state that it could not be verified. Distinguish observed information from inference. Score ICP fit and buying intent independently. A high ICP fit does not imply buying intent.
 
 Company/domain: ${company}
 ICP criteria: ${icp || "US B2B companies with an active sales motion and a credible need for AI-powered lead research, qualification, buying-signal detection, or sales workflow automation."}
 
 Analyze the company identity and business model, likely sales motion, operational complexity, technology/automation needs, and the strongest plausible reason to contact this account. Identify a decision maker only when you can provide a reliable public URL from your available knowledge; otherwise return empty strings. Do not fabricate sources.
 
-Return ONLY valid JSON matching this schema. Do not wrap it in markdown fences:
+Return ONLY one valid JSON object matching this schema. Do not wrap it in markdown fences:
 ${JSON.stringify(schema)}`;
 }
 
@@ -93,45 +93,50 @@ function normalizeRecord(result: unknown) {
   return record;
 }
 
-function getOpenRouterApiKey() {
-  // Support both the conventional production variable and the lowercase name
-  // in case the key was already added that way in Vercel.
-  return process.env.OPENROUTER_API_KEY || process.env.openrouter;
+function getKimiApiKey() {
+  // Vercel environment variable names are case-sensitive. The user's existing
+  // key is named "swift", while the conventional Kimi names are also supported.
+  return (
+    process.env.swift ||
+    process.env.SWIFT ||
+    process.env.KIMI_API_KEY ||
+    process.env.MOONSHOT_API_KEY
+  );
 }
 
-async function runOpenRouter(company: string, icp: string) {
-  const apiKey = getOpenRouterApiKey();
-  if (!apiKey) throw new Error("OPENROUTER_API_KEY_MISSING");
+async function runKimi(company: string, icp: string) {
+  const apiKey = getKimiApiKey();
+  if (!apiKey) throw new Error("KIMI_API_KEY_MISSING");
 
   const client = new OpenAI({
     apiKey,
-    baseURL: "https://openrouter.ai/api/v1",
-    defaultHeaders: {
-      "HTTP-Referer": "https://swiftlabor.ai",
-      "X-Title": "SwiftLabor Scout",
-    },
+    baseURL: "https://api.moonshot.ai/v1",
+    timeout: 90_000,
   });
 
   const response = await client.chat.completions.create({
-    model: process.env.OPENROUTER_MODEL || "google/gemma-4-31b-it:free",
+    model: process.env.KIMI_MODEL || "kimi-k2.6",
     messages: [
       {
         role: "system",
-        content: "You are a precise B2B lead intelligence analyst. Follow the user's schema exactly and never fabricate evidence.",
+        content: "You are a precise B2B lead intelligence analyst. Follow the requested JSON object format exactly and never fabricate evidence.",
       },
       { role: "user", content: buildPrompt(company, icp) },
     ],
-    temperature: 0.2,
     response_format: { type: "json_object" },
+    max_completion_tokens: 8192,
+    extra_body: {
+      thinking: { type: "disabled" },
+    },
   });
 
   const text = response.choices?.[0]?.message?.content || "";
-  if (!text) throw new Error("SCOUT_OPENROUTER_EMPTY_OUTPUT");
+  if (!text) throw new Error("SCOUT_KIMI_EMPTY_OUTPUT");
 
   try {
     return normalizeRecord(JSON.parse(text));
   } catch {
-    throw new Error("SCOUT_OPENROUTER_INVALID_JSON");
+    throw new Error("SCOUT_KIMI_INVALID_JSON");
   }
 }
 
@@ -148,17 +153,26 @@ export async function POST(request: Request) {
     if (company.length < 2) return NextResponse.json({ error: "Enter a valid company name or domain." }, { status: 400 });
 
     try {
-      const record = await runOpenRouter(company, icp);
-      return NextResponse.json({ ...record, agent: "Scout", provider: "openrouter", model: process.env.OPENROUTER_MODEL || "google/gemma-4-31b-it:free" });
+      const record = await runKimi(company, icp);
+      return NextResponse.json({
+        ...record,
+        agent: "Scout",
+        provider: "kimi",
+        model: process.env.KIMI_MODEL || "kimi-k2.6",
+      });
     } catch (providerError) {
-      console.error("scout-openrouter-failed", providerError);
+      console.error("scout-kimi-failed", providerError);
       const message = String((providerError as Error)?.message || "");
       const status = message.includes("429") || message.includes("rate") || message.includes("quota") ? 429 : 502;
-      const error = message === "OPENROUTER_API_KEY_MISSING"
-        ? "OPENROUTER_API_KEY is not configured."
+      const error = message === "KIMI_API_KEY_MISSING"
+        ? "Kimi API key is not configured. Add the Vercel environment variable named swift (or KIMI_API_KEY) and redeploy."
         : status === 429
-          ? "Scout is temporarily rate-limited. Please try again shortly."
-          : "Scout could not complete the research through OpenRouter. Please verify the OpenRouter API key and model configuration.";
+          ? "Scout is temporarily rate-limited by Kimi. Please try again shortly."
+          : message.includes("401") || message.includes("Unauthorized")
+            ? "Kimi rejected the API key. Check that the Vercel variable named swift contains the Kimi API key, then redeploy."
+            : message.includes("model_not_found") || message.includes("model")
+              ? "The configured Kimi model is unavailable. Check KIMI_MODEL or use kimi-k2.6."
+              : "Scout could not complete the research through Kimi. Check the Kimi API key and deployment logs.";
       return NextResponse.json({ error }, { status });
     }
   } catch (error) {
