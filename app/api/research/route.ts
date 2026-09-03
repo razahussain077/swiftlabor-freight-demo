@@ -1,4 +1,3 @@
-import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -19,30 +18,54 @@ const schema = {
 
 const cleanText = (value: unknown, max: number) => String(value ?? "").trim().slice(0, max);
 function isAllowedUrl(value: string) { try { const url = new URL(value); return url.protocol === "https:" || url.protocol === "http:"; } catch { return false; } }
-function buildPrompt(company: string, icp: string) { return `You are Scout, SwiftLabor's Lead Intelligence Agent. Research B2B prospects for a professional sales team.\n\nBe evidence-led. Do not invent people, buying signals, URLs, job titles, company size, or evidence. This model does not automatically have a live browser. Never claim you searched the web or verified a fact unless it is actually available to you. If a fact cannot be established, leave the relevant field empty or say it could not be verified. Distinguish observed information from inference. Score ICP fit and buying intent independently.\n\nCompany/domain: ${company}\nICP criteria: ${icp || "US B2B companies with an active sales motion and a credible need for AI-powered lead research, qualification, buying-signal detection, or sales workflow automation."}\n\nAnalyze company identity and business model, sales motion, operational complexity, technology/automation needs, and strongest plausible reason to contact this account. Identify a decision maker only when you can provide a reliable public URL from available knowledge; otherwise return empty strings. Do not fabricate sources.\n\nReturn ONLY one valid JSON object matching this schema. Do not use markdown fences:\n${JSON.stringify(schema)}`; }
+function buildPrompt(company: string, icp: string) { return `You are Scout, SwiftLabor's Lead Intelligence Agent. Research B2B prospects for a professional sales team.\n\nBe evidence-led. Do not invent people, buying signals, URLs, job titles, company size, or evidence. This model may not have live web access. Never claim you searched the web or verified a fact unless it is actually available to you. If a fact cannot be established, leave the relevant field empty or say it could not be verified. Distinguish observed information from inference. Score ICP fit and buying intent independently.\n\nCompany/domain: ${company}\nICP criteria: ${icp || "US B2B companies with an active sales motion and a credible need for AI-powered lead research, qualification, buying-signal detection, or sales workflow automation."}\n\nAnalyze company identity and business model, sales motion, operational complexity, technology/automation needs, and strongest plausible reason to contact this account. Identify a decision maker only when you can provide a reliable public URL from available knowledge; otherwise return empty strings. Do not fabricate sources.\n\nReturn ONLY one valid JSON object matching this schema. No markdown, no code fences, no commentary. Ensure all strings are valid JSON strings and escape quotation marks correctly.\n${JSON.stringify(schema)}`; }
 function normalizeRecord(result: unknown) { const record = result as Record<string, any>; const modelSources = Array.isArray(record.sources) ? record.sources.filter((source: any) => source && isAllowedUrl(String(source.url ?? ""))).slice(0, 8).map((source: any) => ({ title: cleanText(source.title || "Web source", 180), url: String(source.url), type: cleanText(source.type || "web", 40) })) : []; record.sources = modelSources.filter((source, index, all) => all.findIndex((item) => item.url === source.url) === index); record.signals = Array.isArray(record.signals) ? record.signals.slice(0, 8) : []; record.risks = Array.isArray(record.risks) ? record.risks.slice(0, 6) : []; return record; }
 function getOpenRouterApiKey() { return process.env.OPENROUTER_API_KEY || process.env.swift || process.env.SWIFT || process.env.openrouter; }
 function getOpenRouterModel() { const configured = process.env.OPENROUTER_MODEL?.trim(); if (!configured || configured === "moonshotai/kimi-k2.6:free" || configured === "google/gemma-4-31b-it:free") return "openrouter/free"; return configured; }
 function getProviderError(providerError: unknown) { const error = providerError as any; return { status: Number(error?.status ?? error?.code ?? 0), message: String(error?.error?.message ?? error?.message ?? ""), raw: String(error?.error?.metadata?.raw ?? "") }; }
+function parseJsonOutput(text: string) {
+  const cleaned = text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  try { return JSON.parse(cleaned); } catch {
+    const start = cleaned.indexOf("{"); const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+    throw new Error("SCOUT_OPENROUTER_INVALID_JSON");
+  }
+}
 
 async function runOpenRouter(company: string, icp: string) {
   const apiKey = getOpenRouterApiKey(); if (!apiKey) throw new Error("OPENROUTER_API_KEY_MISSING");
   const model = getOpenRouterModel();
-  const client = new OpenAI({ apiKey, baseURL: "https://openrouter.ai/api/v1", timeout: 90_000, defaultHeaders: { "HTTP-Referer": "https://swiftlabor.ai", "X-Title": "SwiftLabor Scout" } });
   let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      const response = await client.chat.completions.create({ model, messages: [
-        { role: "system", content: "You are a precise B2B lead intelligence analyst. Follow the requested JSON object format exactly and never fabricate evidence." },
-        { role: "user", content: buildPrompt(company, icp) },
-      ], response_format: { type: "json_object" }, max_completion_tokens: 8192 });
-      const text = response.choices?.[0]?.message?.content || ""; if (!text) throw new Error("SCOUT_OPENROUTER_EMPTY_OUTPUT");
-      try { return normalizeRecord(JSON.parse(text)); } catch { throw new Error("SCOUT_OPENROUTER_INVALID_JSON"); }
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json", "HTTP-Referer": "https://swiftlabor.ai", "X-Title": "SwiftLabor Scout" },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: "You are a precise B2B lead intelligence analyst. Follow the requested JSON object format exactly and never fabricate evidence." },
+            { role: "user", content: buildPrompt(company, icp) },
+          ],
+          temperature: 0.1,
+          max_tokens: 6000,
+        }),
+        signal: AbortSignal.timeout(90_000),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error: any = new Error(String(payload?.error?.message || `OpenRouter HTTP ${response.status}`));
+        error.status = response.status; error.error = payload?.error;
+        throw error;
+      }
+      const text = String(payload?.choices?.[0]?.message?.content || "");
+      if (!text) throw new Error("SCOUT_OPENROUTER_EMPTY_OUTPUT");
+      return normalizeRecord(parseJsonOutput(text));
     } catch (error) {
       lastError = error; const { status, message, raw } = getProviderError(error); const combined = `${message} ${raw}`.toLowerCase();
-      const retryable = status === 429 || status === 502 || status === 503 || combined.includes("rate-limited") || combined.includes("rate limit") || combined.includes("temporarily unavailable") || combined.includes("upstream");
-      if (!retryable || attempt === 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
+      const retryable = status === 429 || status === 502 || status === 503 || status === 504 || combined.includes("rate-limited") || combined.includes("rate limit") || combined.includes("temporarily unavailable") || combined.includes("upstream") || combined.includes("timeout");
+      if (!retryable || attempt === 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 900 * (attempt + 1)));
     }
   }
   throw lastError instanceof Error ? lastError : new Error("SCOUT_OPENROUTER_FAILED");
