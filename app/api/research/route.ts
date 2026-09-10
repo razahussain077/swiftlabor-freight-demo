@@ -23,7 +23,7 @@ function isAllowedUrl(value: string) { try { const url = new URL(value); return 
 function normalizeUrl(value: unknown) { const url = String(value ?? "").trim(); return isAllowedUrl(url) ? url : ""; }
 
 function buildPrompt(company: string, icp: string) {
-  return `You are Scout, SwiftLabor's senior B2B Lead Intelligence Agent. Your job is to conduct real, evidence-led prospect research for a sales team.\n\nLIVE RESEARCH IS REQUIRED. You have access to a web-search tool. Use it deliberately; do not answer from memory when a fact can be checked. Search multiple angles when useful: official company site, leadership/team, LinkedIn/public professional profiles, hiring/jobs, recent news/press releases, funding/expansion/acquisitions, technology/automation signals, and evidence related to the ICP. Prefer primary sources and recent sources.\n\nDECISION-MAKER RULES:\n- Find the person who most plausibly owns the problem described by the ICP, not automatically the CEO.\n- Consider Founder/CEO/President, COO/Operations, VP/Director of Operations, CTO/CIO/Technology, RevOps/Sales leadership as appropriate.\n- A person must be supported by a public source. Never invent a name, title or LinkedIn URL.\n- If LinkedIn is not publicly verifiable, leave linkedin empty and set confidence to UNVERIFIED rather than guessing.\n- Return up to 4 relevant decision makers, ranked by relevance.\n\nBUYING-SIGNAL RULES:\nLook for concrete triggers such as active hiring, growth/expansion, new locations, funding, acquisitions, product launches, increased sales hiring, operational complexity, technology changes, AI/automation initiatives, CRM/revops investment, or public statements indicating the problem. Distinguish observed evidence from inference. Do not treat generic industry trends as company-specific intent.\n\nSCORING:\n- fitScore = how strongly the account matches the supplied ICP.\n- intentScore = strength and recency of company-specific buying/trigger evidence.\n- priority HOT only when both fit and intent are credible; WARM for a promising but less urgent account; LOW otherwise.\n- recommendedAction must be a concrete next sales action and explain why.\n\nEVIDENCE:\nEvery important claim should be traceable to a source. Include source URLs actually used. Do not fabricate URLs. If evidence conflicts, say so in risks/notes. It is acceptable to return fewer findings rather than unsupported findings.\n\nCOMPANY OR DOMAIN: ${company}\nICP / QUALIFICATION CRITERIA: ${icp || "US B2B companies, 20–500 employees, active sales motion, and a credible need for lead research, qualification, buying-signal detection, or sales workflow automation."}\n\nReturn ONLY one valid JSON object matching this schema. No markdown, no code fences, no commentary.\n${JSON.stringify(schema)}`;
+  return `You are Scout, SwiftLabor's senior B2B Lead Intelligence Agent. Your job is to conduct real, evidence-led prospect research for a sales team.\n\nLIVE RESEARCH IS REQUIRED. Use the live web-search tool before making company-specific claims. Search multiple angles when useful: official company site, leadership/team, LinkedIn/public professional profiles, hiring/jobs, recent news/press releases, funding/expansion/acquisitions, technology/automation signals, and evidence related to the ICP. Prefer primary sources and recent sources.\n\nDECISION-MAKER RULES:\n- Find the person who most plausibly owns the problem described by the ICP, not automatically the CEO.\n- Consider Founder/CEO/President, COO/Operations, VP/Director of Operations, CTO/CIO/Technology, RevOps/Sales leadership as appropriate.\n- A person must be supported by a public source. Never invent a name, title or LinkedIn URL.\n- If LinkedIn is not publicly verifiable, leave linkedin empty and set confidence to UNVERIFIED rather than guessing.\n- Return up to 4 relevant decision makers, ranked by relevance.\n\nBUYING-SIGNAL RULES:\nLook for concrete triggers such as active hiring, growth/expansion, new locations, funding, acquisitions, product launches, increased sales hiring, operational complexity, technology changes, AI/automation initiatives, CRM/revops investment, or public statements indicating the problem. Distinguish observed evidence from inference. Do not treat generic industry trends as company-specific intent.\n\nSCORING:\n- fitScore = how strongly the account matches the supplied ICP.\n- intentScore = strength and recency of company-specific buying/trigger evidence.\n- priority HOT only when both fit and intent are credible; WARM for a promising but less urgent account; LOW otherwise.\n- recommendedAction must be a concrete next sales action and explain why.\n\nEVIDENCE:\nEvery important claim should be traceable to a source. Include source URLs actually used. Do not fabricate URLs. If evidence conflicts, say so in risks/notes. It is acceptable to return fewer findings rather than unsupported findings.\n\nCOMPANY OR DOMAIN: ${company}\nICP / QUALIFICATION CRITERIA: ${icp || "US B2B companies, 20–500 employees, active sales motion, and a credible need for lead research, qualification, buying-signal detection, or sales workflow automation."}\n\nReturn ONLY one valid JSON object matching this schema. No markdown, no code fences, no commentary.\n${JSON.stringify(schema)}`;
 }
 
 function normalizeRecord(result: unknown) {
@@ -42,7 +42,14 @@ function normalizeRecord(result: unknown) {
 }
 
 function getOpenRouterApiKey() { return process.env.OPENROUTER_API_KEY || process.env.swift || process.env.SWIFT || process.env.openrouter; }
-function getOpenRouterModel() { const configured = process.env.OPENROUTER_MODEL?.trim(); if (!configured || configured === "moonshotai/kimi-k2.6:free" || configured === "google/gemma-4-31b-it:free") return "openrouter/free"; return configured; }
+
+// Keep an explicitly configured model. The previous implementation silently
+// replaced Gemma 4 31B (free) with openrouter/free, making the actual model
+// unpredictable and defeating the intended Scout configuration.
+function getOpenRouterModel() {
+  return process.env.OPENROUTER_MODEL?.trim() || "google/gemma-4-31b-it:free";
+}
+
 function getProviderError(providerError: unknown) { const error = providerError as any; return { status: Number(error?.status ?? error?.code ?? 0), message: String(error?.error?.message ?? error?.message ?? ""), raw: String(error?.error?.metadata?.raw ?? "") }; }
 function parseJsonOutput(text: string) { const cleaned = text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim(); try { return JSON.parse(cleaned); } catch { const start = cleaned.indexOf("{"); const end = cleaned.lastIndexOf("}"); if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1)); throw new Error("SCOUT_OPENROUTER_INVALID_JSON"); } }
 
@@ -58,7 +65,7 @@ async function runOpenRouter(company: string, icp: string) {
         body: JSON.stringify({
           model,
           messages: [
-            { role: "system", content: "You are a rigorous B2B research analyst. Use the live web-search tool when facts need verification. Never fabricate evidence. Return the requested JSON only." },
+            { role: "system", content: "You are a rigorous B2B research analyst. Use the live web-search tool before making company-specific claims. Never fabricate evidence. Return the requested JSON only." },
             { role: "user", content: buildPrompt(company, icp) },
           ],
           tools: [{ type: "openrouter:web_search", parameters: { engine: "auto", max_results: 5, max_total_results: 20, search_context_size: "high" } }],
@@ -66,6 +73,7 @@ async function runOpenRouter(company: string, icp: string) {
           max_tool_calls: 8,
           temperature: 0.1,
           max_tokens: 7000,
+          response_format: { type: "json_object" },
         }),
         signal: AbortSignal.timeout(120_000),
       });
