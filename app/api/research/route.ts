@@ -42,14 +42,13 @@ function normalizeRecord(result: any) {
 }
 
 function getOpenRouterApiKey() { return process.env.OPENROUTER_API_KEY || process.env.swift || process.env.SWIFT || process.env.openrouter; }
-function getConfiguredModel() { return process.env.OPENROUTER_MODEL?.trim() || "openrouter/free"; }
+function getConfiguredModel() { return process.env.OPENROUTER_MODEL?.trim() || "nvidia/nemotron-3-ultra-550b-a55b:free"; }
 function getProviderError(e: any) { return { status: Number(e?.status ?? e?.code ?? 0), message: String(e?.error?.message ?? e?.message ?? ""), raw: String(e?.error?.metadata?.raw ?? "") }; }
 
 function repairJson(text: string) {
   let cleaned = text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
   const start = cleaned.indexOf("{"); const end = cleaned.lastIndexOf("}");
   if (start >= 0 && end > start) cleaned = cleaned.slice(start, end + 1);
-  // Models occasionally emit invalid backslash escapes inside otherwise valid JSON.
   cleaned = cleaned.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
   return cleaned;
 }
@@ -70,7 +69,6 @@ async function callOpenRouter(company: string, icp: string, model: string) {
         { role: "system", content: "You are a rigorous B2B research analyst. Use live web search. Never fabricate evidence. Return the requested JSON only." },
         { role: "user", content: buildPrompt(company, icp) }
       ],
-      // Server tool is model-agnostic. OpenRouter documents this tool for live search across models.
       tools: [{ type: "openrouter:web_search", parameters: { engine: "auto", max_results: 5 } }],
       tool_choice: "auto",
       max_tool_calls: 8,
@@ -96,8 +94,7 @@ async function callOpenRouter(company: string, icp: string, model: string) {
 
 async function runOpenRouter(company: string, icp: string) {
   const configured = getConfiguredModel();
-  // Do not get stuck retrying the same exhausted free provider. The router can select another eligible free model.
-  const models = [configured, "openrouter/free", "google/gemma-4-31b-it:free"].filter((m, i, a) => m && a.indexOf(m) === i);
+  const models = [configured, "nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "openrouter/free"].filter((m, i, a) => m && a.indexOf(m) === i);
   let lastError: unknown;
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
