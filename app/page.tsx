@@ -14,6 +14,13 @@ type Result = {
 };
 
 const steps=["Discover","Research","Verify","Score","Recommend"];
+const statusMessages=[
+  "Finding the official company footprint…",
+  "Researching leadership and decision makers…",
+  "Checking recent buying signals and evidence…",
+  "Scoring ICP fit and buying intent…",
+  "Building the qualification brief…"
+];
 
 export default function Home(){
   const[company,setCompany]=useState("");
@@ -21,9 +28,16 @@ export default function Home(){
   const[running,setRunning]=useState(false); const[step,setStep]=useState(0); const[result,setResult]=useState<Result|null>(null); const[error,setError]=useState(""); const[notice,setNotice]=useState("");
 
   async function runAgent(){
-    if(!company.trim()||running)return; setRunning(true);setError("");setNotice("");setResult(null);setStep(0);
-    const timer=window.setInterval(()=>setStep(s=>Math.min(s+1,4)),1400);
-    try{const res=await fetch("/api/research",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:company.trim(),icp:icp.trim()})});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||"Research failed");setResult(data);setStep(4);}catch(e){setError(e instanceof Error?e.message:"Research failed");}finally{window.clearInterval(timer);setRunning(false);}
+    if(!company.trim()||running)return;
+    setRunning(true);setError("");setNotice("");setResult(null);setStep(0);
+    const timer=window.setInterval(()=>setStep(s=>Math.min(s+1,3)),3200);
+    try{
+      const res=await fetch("/api/research",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:company.trim(),icp:icp.trim()})});
+      const data=await res.json().catch(()=>({}));
+      if(!res.ok)throw new Error(data.error||"Research failed");
+      setResult(data);setStep(4);
+    }catch(e){setError(e instanceof Error?e.message:"Research failed");}
+    finally{window.clearInterval(timer);setRunning(false);}
   }
   async function copyBrief(){if(!result)return;const people=result.decisionMakers?.filter(p=>p.name).map(p=>`${p.name} — ${p.title}`).join("\n")||"Not verified";const text=`${result.company}\nICP fit: ${result.fitScore}/100\nBuying intent: ${result.intentScore}/100\nPriority: ${result.priority}\n\n${result.summary}\n\nDecision makers:\n${people}\n\nRecommended action: ${result.recommendedAction}`;try{await navigator.clipboard.writeText(text);setNotice("Qualification brief copied");window.setTimeout(()=>setNotice(""),2200)}catch{setNotice("Copy unavailable in this browser")}}
 
@@ -33,7 +47,7 @@ export default function Home(){
       <section className="workspace"><div className="pageIntro"><div><div className="kicker">SWIFTLABOR / AGENT 01</div><h1>Prospect Research</h1><p>Scout finds the accounts worth your team's attention — then explains why.</p></div><div className="agentBadge"><span><Sparkles size={14}/></span><div><b>Scout</b><small>Live research & qualification agent</small></div></div></div>
         <div className="researchCard"><div className="researchTop"><div><span className="stepPill">01</span><div><h2>Research a company</h2><p>Scout searches public sources, verifies evidence, finds relevant decision makers and builds a qualification record.</p></div></div><span className="secure"><Globe2 size={13}/> Live web research</span></div>
           <div className="fields"><label><span>COMPANY OR DOMAIN</span><div className="inputWrap"><Globe2 size={16}/><input value={company} onChange={e=>setCompany(e.target.value)} placeholder="e.g. acme.com or Acme Logistics" onKeyDown={e=>e.key==="Enter"&&runAgent()}/></div></label><label><span>ICP / QUALIFICATION CRITERIA</span><div className="inputWrap"><Target size={16}/><input value={icp} onChange={e=>setIcp(e.target.value)} onKeyDown={e=>e.key==="Enter"&&runAgent()}/></div></label><button className="runButton" onClick={runAgent} disabled={running||!company.trim()}>{running?<><Loader2 size={15} className="spin"/> Researching</>:<><Search size={15}/> Run Scout <ArrowUpRight size={15}/></>}</button></div>
-          {running&&<div className="progress"><div className="progressLine"><i style={{width:`${((step+1)/steps.length)*100}%`}}/></div><div className="progressSteps">{steps.map((x,i)=><span className={step>=i?"done":""} key={x}>{step>i?<Check size={11}/>:i+1} {x}</span>)}</div></div>}{error&&<div className="error" role="alert">{error}</div>}
+          {running&&<div className="progress"><div className="progressLive"><Loader2 size={13} className="spin"/><span>{statusMessages[Math.min(step,statusMessages.length-1)]}</span></div><div className="progressLine"><i/></div><div className="progressSteps">{steps.map((x,i)=><span className={step>=i?"done":""} key={x}>{step>i?<Check size={11}/>:i+1} {x}</span>)}</div></div>}{error&&<div className="error" role="alert">{error}</div>}
         </div>
         <div className="resultsHeader"><div><div className="kicker">02 / QUALIFICATION RECORD</div><h2>Evidence-led account intelligence</h2></div>{notice&&<div className="notice">{notice}</div>}</div>
         {!result?<div className="emptyState"><div className="emptyIcon"><Search size={20}/></div><b>{company?"Ready to research":"No prospect selected"}</b><p>Scout uses live public web research to validate company facts, buying signals and the people most relevant to the opportunity.</p><span className="emptyMeta"><ShieldCheck size={12}/> API credentials remain server-side</span></div>:<ResultView result={result} onCopy={copyBrief}/>} 
