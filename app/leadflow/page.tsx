@@ -17,7 +17,6 @@ import {
   RotateCcw,
   Settings2,
   ShieldCheck,
-  Sparkles,
   UserRound,
   Wrench,
   Zap,
@@ -50,7 +49,7 @@ export default function LeadFlowDemo() {
   return <main className={styles.page}>
     <header className={styles.topbar}>
       <div className={styles.brand}><div className={styles.logo}>S</div><div><strong>SwiftLabor</strong><span>LEADFLOW</span></div></div>
-      <div className={styles.topMeta}><span className={styles.demoBadge}><span /> Demo environment</span><span className={styles.secure}><ShieldCheck size={13}/> No API keys required</span></div>
+      <div className={styles.topMeta}><span className={styles.workspaceStatus}><span /> Northstar HVAC</span></div>
     </header>
 
     <div className={styles.shell}>
@@ -68,50 +67,50 @@ export default function LeadFlowDemo() {
 
       <section className={styles.content}>
         <div className={styles.heading}>
-          <div><div className={styles.eyebrow}>SWIFTLABOR / LEADFLOW</div><h1>Turn service requests into ready-to-work leads.</h1><p>One workflow from customer inquiry to a structured, actionable lead.</p></div>
-          <button className={styles.reset} onClick={reset}><RotateCcw size={14}/> Reset demo</button>
+          <div><div className={styles.eyebrow}>LEAD INBOX</div><h1>New leads, handled before they go cold.</h1><p>Capture the request, qualify it, and get the right next action in front of your team.</p></div>
+          <button className={styles.reset} onClick={reset}><RotateCcw size={13}/> Reset</button>
         </div>
 
         <div className={styles.stats}>
-          <Stat icon={<Inbox size={15}/>} label="New requests" value="4" detail="today"/>
-          <Stat icon={<Clock3 size={15}/>} label="Avg. response" value="2m" detail="last 30 days"/>
+          <Stat icon={<Inbox size={15}/>} label="New leads" value="4" detail="today"/>
+          <Stat icon={<Clock3 size={15}/>} label="First response" value="2m" detail="average"/>
           <Stat icon={<CalendarClock size={15}/>} label="Appointments" value="7" detail="this week"/>
           <Stat icon={<Bell size={15}/>} label="Needs attention" value="1" detail="now"/>
         </div>
 
         <div className={styles.tabs}>
-          <button className={activeTab === "flow" ? styles.tabActive : ""} onClick={() => setActiveTab("flow")}>Live workflow</button>
+          <button className={activeTab === "flow" ? styles.tabActive : ""} onClick={() => setActiveTab("flow")}>New request</button>
           <button className={activeTab === "lead" ? styles.tabActive : ""} onClick={() => setActiveTab("lead")}>Lead record</button>
         </div>
 
         {activeTab === "flow" ? <div className={styles.flowGrid}>
           <section className={styles.card}>
-            <div className={styles.cardHeader}><div><span className={styles.cardKicker}>STEP 01 · CUSTOMER INTAKE</span><h2>Smart service request</h2></div><span className={styles.live}><span/> LIVE</span></div>
+            <div className={styles.cardHeader}><div><span className={styles.cardKicker}>INCOMING REQUEST</span><h2>Service details</h2></div><span className={styles.live}><span/> LIVE</span></div>
             <div className={styles.form}>
               <Field label="Customer name" icon={<UserRound size={14}/>} value={lead.name} onChange={v=>setLead({...lead,name:v})}/>
               <div className={styles.two}><Field label="Phone" icon={<Phone size={14}/>} value={lead.phone} onChange={v=>setLead({...lead,phone:v})}/><Field label="ZIP code" icon={<MapPin size={14}/>} value={lead.zip} onChange={v=>setLead({...lead,zip:v})}/></div>
               <div className={styles.two}>
-                <SelectField label="Service needed" value={lead.service} onChange={v=>setLead({...lead,service:v})} options={["AC Repair","AC Replacement","Heating Repair","Maintenance"]}/>
-                <SelectField label="Urgency" value={lead.urgency} onChange={v=>setLead({...lead,urgency:v})} options={["Today","This week","Flexible","Emergency"]}/>
+                <SelectField label="Service" value={lead.service} onChange={v=>setLead({...lead,service:v})} options={["AC Repair","AC Replacement","Heating Repair","Maintenance"]}/>
+                <SelectField label="Timing" value={lead.urgency} onChange={v=>setLead({...lead,urgency:v})} options={["Today","This week","Flexible","Emergency"]}/>
               </div>
               <SelectField label="Property" value={lead.property} onChange={v=>setLead({...lead,property:v})} options={["Single-family home","Townhome","Commercial property","Other"]}/>
               <label className={styles.textarea}><span>WHAT'S HAPPENING?</span><textarea value={lead.issue} onChange={e=>setLead({...lead,issue:e.target.value})}/></label>
-              <button className={styles.primary} onClick={submit}><Play size={14} fill="currentColor"/> Simulate customer submission <ArrowRight size={14}/></button>
-              <div className={styles.formNote}><ShieldCheck size={13}/> Demo data only · no customer information is sent</div>
+              <button className={styles.primary} onClick={submit}>Process request <ArrowRight size={14}/></button>
+              <div className={styles.formNote}>Sample request · nothing is sent from this demo</div>
             </div>
           </section>
 
           <section className={styles.card}>
-            <div className={styles.cardHeader}><div><span className={styles.cardKicker}>STEP 02–05 · AUTOMATED HANDOFF</span><h2>What happens next</h2></div><Sparkles size={16} className={styles.spark}/></div>
-            <WorkflowStep number="02" icon={<FileText size={15}/>} title="Request structured" text="Service, urgency, location and issue are captured as fields." state={submitted ? "done" : "waiting"}/>
-            <WorkflowStep number="03" icon={<Zap size={15}/>} title="Lead qualified" text="Urgency and service type are checked against routing rules." state={submitted ? "done" : "waiting"}/>
-            <WorkflowStep number="04" icon={<Bell size={15}/>} title="Office notified" text="A clean lead record is sent to the team instead of raw form data." state={submitted ? "done" : "waiting"}/>
-            <WorkflowStep number="05" icon={<CalendarClock size={15}/>} title="Follow-up ready" text="Customer gets confirmation and the team gets the next action." state={submitted ? "done" : "waiting"}/>
-            {submitted ? <div className={styles.successBox}><Check size={15}/><div><b>Lead ready for the team</b><span>Qualified request created in 1.8 seconds.</span></div><button onClick={()=>setActiveTab("lead")}>View record <ArrowRight size={12}/></button></div> : <div className={styles.waitBox}><Clock3 size={14}/><span>Submit the request on the left to run the workflow.</span></div>}
+            <div className={styles.cardHeader}><div><span className={styles.cardKicker}>LEAD ROUTING</span><h2>From request to next action</h2></div><span className={styles.timeNote}>~2 sec</span></div>
+            <WorkflowStep number="02" icon={<FileText size={15}/>} title="Request captured" text="Service, urgency, location and issue are captured as fields." state={submitted ? "done" : "waiting"}/>
+            <WorkflowStep number="03" icon={<Zap size={15}/>} title="Priority checked" text="Urgency and service type are checked against routing rules." state={submitted ? "done" : "waiting"}/>
+            <WorkflowStep number="04" icon={<Bell size={15}/>} title="Team alerted" text="A clean lead record is sent to the team instead of raw form data." state={submitted ? "done" : "waiting"}/>
+            <WorkflowStep number="05" icon={<CalendarClock size={15}/>} title="Follow-up queued" text="Customer gets confirmation and the team gets the next action." state={submitted ? "done" : "waiting"}/>
+            {submitted ? <div className={styles.successBox}><Check size={15}/><div><b>Request processed</b><span>Lead is ready for the team.</span></div><button onClick={()=>setActiveTab("lead")}>View record <ArrowRight size={12}/></button></div> : <div className={styles.waitBox}><Clock3 size={14}/><span>Submit the request on the left to run the workflow.</span></div>}
           </section>
         </div> : <LeadRecord lead={lead} submitted={submitted} onBack={()=>setActiveTab("flow")}/>}
 
-        <div className={styles.bottomNote}><Wrench size={14}/><div><b>Built for service businesses.</b><span>LeadFlow can be adapted to HVAC, plumbing, electrical, roofing and other appointment-driven teams.</span></div><span className={styles.brandNote}>SWIFTLABOR</span></div>
+        <div className={styles.bottomNote}><Wrench size={14}/><div><b>Designed around HVAC operations.</b><span>LeadFlow can be connected to the tools your office already uses.</span></div><span className={styles.brandNote}>SWIFTLABOR</span></div>
       </section>
     </div>
   </main>;
@@ -134,12 +133,12 @@ function LeadRecord({lead,submitted,onBack}:{lead:typeof initialLead;submitted:b
     <div className={styles.recordTop}><button className={styles.back} onClick={onBack}>← Back to workflow</button><span className={submitted?styles.ready:""}>{submitted?"READY FOR TEAM":"PREVIEW"}</span></div>
     <div className={styles.recordGrid}>
       <section className={styles.card}>
-        <div className={styles.recordHero}><div className={styles.customerAvatar}>SM</div><div><span className={styles.cardKicker}>NEW SERVICE REQUEST</span><h2>{lead.name}</h2><p>{lead.service} · {lead.zip} · {lead.urgency}</p></div><div className={styles.hot}>PRIORITY <b>{lead.urgency==="Today"?"HIGH":"NORMAL"}</b></div></div>
-        <div className={styles.detailGrid}><Detail label="PHONE" value={lead.phone}/><Detail label="PROPERTY" value={lead.property}/><Detail label="SERVICE" value={lead.service}/><Detail label="PREFERRED WINDOW" value={lead.time}/></div>
-        <div className={styles.issue}><span>ISSUE DESCRIPTION</span><p>{lead.issue}</p></div>
-        <div className={styles.actionRow}><button className={styles.primary}><CalendarClock size={14}/> Schedule appointment</button><button className={styles.secondary}><MessageSquareText size={14}/> Send update</button><button className={styles.ghost}><Phone size={14}/> Call customer</button></div>
+        <div className={styles.recordHero}><div className={styles.customerAvatar}>SM</div><div><span className={styles.cardKicker}>NEW LEAD</span><h2>{lead.name}</h2><p>{lead.service} · {lead.zip} · {lead.urgency}</p></div><div className={styles.hot}>PRIORITY <b>{lead.urgency==="Today"?"HIGH":"NORMAL"}</b></div></div>
+        <div className={styles.detailGrid}><Detail label="PHONE" value={lead.phone}/><Detail label="PROPERTY" value={lead.property}/><Detail label="SERVICE" value={lead.service}/><Detail label="REQUESTED" value={lead.time}/></div>
+        <div className={styles.issue}><span>CUSTOMER MESSAGE</span><p>{lead.issue}</p></div>
+        <div className={styles.nextAction}><div><span>NEXT ACTION</span><b>Offer the next available AC repair window.</b></div><span className={styles.actionState}>OPEN</span></div><div className={styles.actionRow}><button className={styles.primary}><CalendarClock size={14}/> Schedule</button><button className={styles.secondary}><MessageSquareText size={14}/> Send update</button><button className={styles.ghost}><Phone size={14}/> Call</button></div>
       </section>
-      <aside className={styles.card + " " + styles.timeline}><span className={styles.cardKicker}>AUTOMATION LOG</span><h3>LeadFlow activity</h3>
+      <aside className={styles.card + " " + styles.timeline}><span className={styles.cardKicker}>AUTOMATION LOG</span><h3>Lead timeline</h3>
         {["Request received","Fields structured","Priority determined","Team notification queued","Customer confirmation ready"].map((x,i)=><div className={styles.timelineItem} key={x}><div className={styles.timelineDot}>{i<4?<Check size={10}/>:<Clock3 size={10}/>}</div><div><b>{x}</b><small>{i<4?"Completed just now":"Next action"}</small></div></div>)}
       </aside>
     </div>
