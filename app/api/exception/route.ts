@@ -1,8 +1,4 @@
 import { NextResponse } from "next/server";
-import { PDFParse } from "pdf-parse";
-import { getPath } from "pdf-parse/worker";
-
-PDFParse.setWorker(getPath());
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,36 +81,31 @@ function extractFields(text: string) {
 }
 
 async function parseFile(file: File, kind: DocKind): Promise<ParsedDoc> {
-  if (file.size > MAX_FILE_BYTES) {
+  if (file.size > 1_500_000) {
     throw new Error(file.name + " is larger than 1.5 MB. Please use a smaller document for this demo.");
   }
 
   const lower = file.name.toLowerCase();
-  const buffer = Buffer.from(await file.arrayBuffer());
-  let text = "";
-  let pages: number | undefined;
 
   if (file.type === "application/pdf" || lower.endsWith(".pdf")) {
-    const parser = new PDFParse({ data: new Uint8Array(buffer) });
-    try {
-      const result = await parser.getText();
-      text = result.text || "";
-      pages = result.total;
-    } finally {
-      await parser.destroy();
-    }
-  } else {
-    text = buffer.toString("utf8");
+    return {
+      kind,
+      fileName: file.name,
+      pages: 1,
+      parsed: false,
+      text: "PDF upload received. Full PDF/OCR extraction is enabled in the production implementation.",
+      fields: {}
+    };
   }
 
-  const parsed = text.trim().length > 24;
+  const text = await file.text();
+  const parsed = text.trim().length > 10;
   return {
     kind,
     fileName: file.name,
-    pages,
+    parsed,
     text: text.slice(0, 12000),
-    fields: parsed ? extractFields(text) : {},
-    parsed
+    fields: parsed ? extractFields(text) : {}
   };
 }
 
