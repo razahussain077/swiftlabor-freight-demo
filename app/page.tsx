@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useState } from "react";
+import { useState, type ChangeEvent } from "react";
 import {
   AlertCircle,
   AlertTriangle,
