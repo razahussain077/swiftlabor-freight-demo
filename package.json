@@ -1,6 +1,6 @@
 {
   "name": "swiftlabor-freight-exception-desk",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,7 +11,6 @@
   "dependencies": {
     "lucide-react": "latest",
     "next": "latest",
-    "pdf-parse": "2.4.5",
     "react": "latest",
     "react-dom": "latest"
   },
