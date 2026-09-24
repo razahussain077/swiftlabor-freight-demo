@@ -267,11 +267,7 @@ function analyze(documents: ParsedDoc[]) {
 
   const high = checks.filter(c => c.severity === "HIGH");
   const medium = checks.filter(c => c.severity === "MEDIUM");
-  const invoiceTotal = money(inv.total);
-  const approvedTotal = (money(rate.linehaul) || 0) + (money(rate.fuel) || 0) + (money(rate.accessorial) || 0);
-  const riskAmount = invoiceTotal != null && approvedTotal > 0
-    ? Math.max(0, Math.round((invoiceTotal - approvedTotal) * 100) / 100)
-    : Math.round(checks.reduce((sum, c) => sum + Math.max(0, Number(c.amount || 0)), 0) * 100) / 100;
+  const riskAmount = Math.round(checks.reduce((sum, c) => sum + Math.max(0, Number(c.amount || 0)), 0) * 100) / 100;
 
   return {
     status: high.length ? "EXCEPTION" : "REVIEW",
