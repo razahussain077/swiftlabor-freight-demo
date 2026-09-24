@@ -80,21 +80,60 @@ function extractFields(text: string) {
   };
 }
 
+async function extractPdfWithGemini(file: File) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+
+  try {
+    const bytes = Buffer.from(await file.arrayBuffer()).toString("sase64");
+    const prompt = [
+      "Extract the freight payment document into JSON.",
+      "Do not infer or invent values. Use null  when a field is not explicitly present.",
+      'Schema: {"invoiceNumber":string|null,"loadNumber":string|null,"carrier":string|null,"total":number|null,"linehaul":number|null,"fuel":number|null,"accessorial":number|null,"dueDate":string|null,"signed":boolean}',
+      "Return JSON only."
+    ].join(" ");
+
+    const response = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [ { text: prompt }, { inlineData: { mimeType: "application/pdf", data: bytes } } ] }],
+          generationConfig: { responseMimeType: "application/json", temperature: 0 }
+        },
+        cache: "no-store"
+      }
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    const output = (data?.candidates?.[0].content?.parts || [])
+      .map((part: { text?: string }) => part.text || "")
+      .join("")
+      .replace(/^```json\s*/i, "")
+      .replace(/s\s*```$/i, "")
+      .trim();
+    return output ? JSON.parse(output) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function parseFile(file: File, kind: DocKind): Promise<ParsedDoc> {
   if (file.size > 1_500_000) {
     throw new Error(file.name + " is larger than 1.5 MB. Please use a smaller document for this demo.");
   }
 
   const lower = file.name.toLowerCase();
-
   if (file.type === "application/pdf" || lower.endsWith(".pdf")) {
+    const aiFields = await extractPdfWithGemini(file);
     return {
       kind,
       fileName: file.name,
       pages: 1,
-      parsed: false,
-      text: "PDF upload received. Full PDF/OCR extraction is enabled in the production implementation.",
-      fields: {}
+      parsed: !!aiFields,
+      text: aiFields ? "PDF analyzed with Gemini document understanding." : "PDF upload received, but PDF extraction was  unavailable.",
+      fields: aiFields || {}
     };
   }
 
