@@ -211,6 +211,8 @@ function ResultView({ result, action, onAction }: { result: Result; action: stri
   const invoice = result.documents.find(x => x.kind === "invoice");
   const rate = result.documents.find(x => x.kind === "rate_confirmation");
   const approvedTotal = num(rate?.fields.linehaul) + num(rate?.fields.fuel) + num(rate?.fields.accessorial);
+  const invoiceTotal = num(invoice?.fields.total);
+  const netRisk = invoiceTotal > 0 && approvedTotal > 0 ? Math.max(0, Math.round((invoiceTotal - approvedTotal) * 100) / 100) : result.riskAmount;
 
   return <div className="results">
     <section className="decision card">
@@ -218,7 +220,7 @@ function ResultView({ result, action, onAction }: { result: Result; action: stri
         {result.status === "EXCEPTION" ? <AlertTriangle size={20} /> : result.status === "READY" ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
       </div>
       <div className="decisionCopy"><div className="decisionLabel">{result.status} · {result.severity}</div><h3>{result.headline}</h3><p>{result.summary}</p></div>
-      <div className="risk"><span>AMOUNT AT RISK</span><b>{"$" + result.riskAmount.toFixed(2)}</b><small>{result.decision}</small></div>
+      <div className="risk"><span>AMOUNT AT RISK</span><b>{"$" + netRisk.toFixed(2)}</b><small>{result.decision}</small></div>
     </section>
 
     <div className="metricGrid">
